@@ -1,5 +1,5 @@
 # super-stoked
-Fluid Dynamics Simulations in the Low Reynolds Number Regime
+### Fluid Dynamics Simulations in the Low Reynolds Number Regime
 
 Using the regularised stokeslet method, we model some phenomenon in fluid following Stokes equations.
 
