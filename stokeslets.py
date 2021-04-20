@@ -61,7 +61,16 @@ def hookes(s,i,j,k,l0):
     f = (k*(np.linalg.norm(s[j]-s[i])-l0)/(l0*(np.linalg.norm(s[j]-s[i]))))*(-(s[j]-s[i]))
     return f
 
-def evolve (tau,tim,R,r,s,k,e):
+def w(s,i,j,vi,vj):
+    w = np.cross((s[i]-s[j]),vi-vj)/np.linalg.norm(s[i]-s[j])**2
+    return w
+
+def angular_hookes(s,i,j,k,vi,vj,vk,c):
+    #torque acting on j due to i
+    power = -c*(w(s,i,j,vi,vj)-w(s,k,j,vk,vj))
+    return power
+
+def evolve (tau,tim,R,r,s,k,e,c=0):
     dt = tim[1]-tim[0]
     l0 = np.zeros(np.shape(s)[0]-1)
     for joint,_ in enumerate(l0):
@@ -69,6 +78,7 @@ def evolve (tau,tim,R,r,s,k,e):
     
     #initialize
     Ust = np.zeros(np.shape(R))
+    Uturn = np.zeros(np.shape(R))
     
     #velocity field for each instant in time
     U = np.zeros((tim.size,)+np.shape(R))
@@ -85,7 +95,7 @@ def evolve (tau,tim,R,r,s,k,e):
             Urot += rotlet(R,tau[m][i],s[mot],e)
         
         #get velocity field for time instant
-        U[i] = Urot+Ust
+        U[i] = Urot+Ust+Uturn
 
         #get positions of rod elements due to flow
         for si in range(s.shape[0]):
@@ -95,11 +105,18 @@ def evolve (tau,tim,R,r,s,k,e):
         
         #reset
         Ust = np.zeros(np.shape(R))
+        Uturn = np.zeros(np.shape(R))
         
         #get forces due to elements on their neighbours
         for si in range(s.shape[0]-1):
             f = hookes(s,si,si+1,k,l0[si])
             Ust += stokeslet(R,f,s[si+1],e)+stokeslet(R,-f,s[si],e)
+            
+        #get torques for rigid angles
+        for si in range(s.shape[0]-2):
+            power = angular_hookes(s,si,si+1,si+2,Up(U[i],s[si],R),Up(U[i],s[si+1],R),Up(U[i],s[si+2],R),c)
+            sign = -1 if (np.mod(si,2) == 1) else 1
+            Uturn += rotlet(R,power*sign,s[si+1],e)
         
     return U,rod
 
