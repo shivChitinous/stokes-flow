@@ -75,6 +75,7 @@ def P0(et,ph,lim=[0.5,1.5],res=0.1,plot=False,figfile="",T=8,strokes=1,k=100,e=0
     if plot:
         plt.plot(P_vec,delphi0,'o',color='seagreen')
         plt.plot(func(delphi0),delphi0,alpha=0.5)
+        plt.title("$\phi = "+str(round(ph,2))+",\ \eta = "+str(round(et,2))+"$")
         plt.legend(["simulated values","interpolated values"])
         plt.ylabel(r"$\Delta\phi_0$")
         plt.xlabel(r"$P$")
