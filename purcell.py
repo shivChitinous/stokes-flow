@@ -1,7 +1,8 @@
 import numpy as np
 import scipy as sp
-from itertools import product
 import stokeslets as slts
+import matplotlib.pyplot as plt
+from scipy import interpolate
 
 def alternating_stroke(tim,shift,power=0.4,strokes=4):
     T = np.max(tim) #maximum time
@@ -17,7 +18,7 @@ def alternating_stroke(tim,shift,power=0.4,strokes=4):
     #each stroke for an arm is composed of an upward torque, a gap, a downward torque and another gap (equally divided in time)
     return stroke
 
-def stroke_input(P,f,tim,r,strokes=4):
+def stroke_input(P,tim,r,strokes=4,f=0):
     tau = np.array([np.zeros(np.shape(tim)+(3,))]*np.size(r))
     tau[1,:,-1] = alternating_stroke(tim,power=P,strokes=strokes,
                                      shift=0)-alternating_stroke(tim,power=f*P,strokes=strokes,shift=0.25)
@@ -25,20 +26,13 @@ def stroke_input(P,f,tim,r,strokes=4):
                                       shift=0.25)+alternating_stroke(tim,power=f*P,strokes=strokes,shift=0) 
     return tau
 
-def omega(tau,pswimmer,arm=[3,2]):
-    #angular velocity difference between arm end points
-    #syntax: arm = [outer_point,inner_point]
-    diff = np.linalg.norm([np.diff(pswimmer[:].T[0][arm[0]]),np.diff(pswimmer[:].T[1][arm[0]])
-            ],axis=0)-np.linalg.norm([np.diff(pswimmer[:].T[0][arm[1]]),np.diff(pswimmer[:].T[1][arm[1]])],axis=0)
-    rms_diff = np.sqrt(np.mean((diff[(np.abs(tau[np.mod(arm[1],2),:,-1])-np.abs(tau[np.mod(arm[0],2),:,-1]))[1:]>0])**2))
-    return rms_diff
-
 def delphinought(tau,pswimmer,ph):
-    arm=[3,2]  #syntax: arm = [right_point,left_point]
-    first_shift = np.where((np.abs(tau[np.mod(arm[1],2),:,-1])-np.abs(tau[np.mod(arm[0],2),:,-1]))>0)[0][0]
-    x = pswimmer[first_shift].T[0][arm[0]]-pswimmer[first_shift].T[0][arm[1]]
-    y = pswimmer[first_shift].T[1][arm[0]]-pswimmer[first_shift].T[1][arm[1]]
-    angle = np.abs(ph-np.abs(np.arctan(y/x)))
+    arm=[1,0] #second arm
+    shifts = np.where(np.diff(tau[0,:,-1])!=0)[0]+1 #every instant the motors switch
+    #the second shift is when the second arm finishes its first stroke
+    x = pswimmer[shifts[1]+1].T[0][arm[0]]-pswimmer[shifts[1]+1].T[0][arm[1]]
+    y = pswimmer[shifts[1]+1].T[1][arm[0]]-pswimmer[shifts[1]+1].T[1][arm[1]]
+    angle = ph-np.arctan(y/x)
     return angle
 
 def init(et,ph,size=0.5,dt=0.01,T=16):
@@ -54,3 +48,37 @@ def init(et,ph,size=0.5,dt=0.01,T=16):
 def stroke_function(omega,delphinought):
     s = omega/np.max(omega)+delphinought/np.max(delphinought)
     return s
+
+def P0(et,ph,lim=[0.5,1.5],res=0.1,plot=False,figfile="",T=8,strokes=1,k=100,e=0.3,c=0.6):
+    
+    P_vec = np.arange(lim[0],lim[1]+res,res) #range of P values
+    delphi0 = np.zeros(np.shape(P_vec))
+    
+    for i,P in enumerate(P_vec):
+        s,r,tim = init(et,ph,T=T)
+        tau = stroke_input(P,tim,r,strokes=strokes)
+        R = slts.mesher()
+        try:
+            _,pswimmer = slts.evolve(tau,tim,R,r,s,k=k,e=e,c=c)
+            delphi0[i] = delphinought(tau,pswimmer,ph)
+        except ValueError: #sometimes the swimmer can swim out of frame
+            delphi0[i] = None
+        print("Progress:",np.round((i+1)/np.size(P_vec)*100,2),"%")
+        
+    #modifying the function:
+    jump = np.where(np.diff(delphi0)>0)[0][0]+1
+    delphi0[jump:] = delphi0[jump:]-np.pi
+    
+    func = sp.interpolate.interp1d(delphi0, P_vec)
+    P0 = func([0])[0]
+    
+    if plot:
+        plt.plot(P_vec,delphi0,'o',color='seagreen')
+        plt.plot(func(delphi0),delphi0,alpha=0.5)
+        plt.legend(["simulated values","interpolated values"])
+        plt.ylabel(r"$\Delta\phi_0$")
+        plt.xlabel(r"$P$")
+        plt.annotate("$P_0 = "+str(round(P0,3))+"$",(0.7*np.max(P_vec),np.mean(delphi0)))
+        plt.savefig(figfile+"parameter_space_"+str(round(ph,2))+"_"+str(round(et,2))+".png",dpi=300,bbox_inches="tight")
+    
+    return P0
