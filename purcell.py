@@ -35,12 +35,14 @@ def delphinought(tau,pswimmer,ph):
     angle = ph-np.arctan(y/x)
     return angle
 
-def init(et,ph,size=0.5,dt=0.01,T=16):
+def init(et,ph,size=1,dt=0.01,T=16):
     s = np.zeros([4,3]);
-    s[1,0:2] = np.array([-size/2,0]) #motor 1
-    s[2,0:2] = np.array([size/2,0]) #motor 2
-    s[0,0:2] = np.array([-size*et*np.cos(ph)-size/2,size*et*np.sin(ph)]) #arm 1
-    s[3,0:2] = np.array([size*et*np.cos(ph)+size/2,size*et*np.sin(ph)]) #arm 2
+    a = size/(2+et) #one-arm length
+    b = a*et #body length
+    s[1,0:2] = np.array([-b/2,0]) #motor 1
+    s[2,0:2] = np.array([b/2,0]) #motor 2
+    s[0,0:2] = np.array([-a*np.cos(ph)-b/2,a*np.sin(ph)]) #arm 1
+    s[3,0:2] = np.array([a*np.cos(ph)+b/2,a*np.sin(ph)]) #arm 2
     r = np.array([1,2]) #motor specifications
     tim = np.arange(0,T,dt)
     return s,r,tim
@@ -49,7 +51,33 @@ def stroke_function(omega,delphinought):
     s = omega/np.max(omega)+delphinought/np.max(delphinought)
     return s
 
-def P0(et,ph,lim=[0.5,1.5],res=0.1,plot=False,figfile="",T=8,strokes=1,k=100,e=0.3,c=0.6):
+def purcell_plot(swimmer,tim,ph,et,plot=False,save=False,figfile=""):
+    arm1 = swimmer[:,0]-swimmer[:,1] #arm 1 vector 
+    body = swimmer[:,1]-swimmer[:,2] #body vector
+    arm2 = swimmer[:,3]-swimmer[:,2] #arm 2 vector
+    t1 = np.array([np.arctan2(np.array([0,0,-1]).dot(np.cross(arm2[i],-body[i])),arm2[i].dot(-body[i])) 
+                   for i in range(np.size(tim))])*180/np.pi #theta1
+    t2 = np.array([np.arctan2(np.array([0,0,-1]).dot(np.cross(arm1[i],body[i])),arm1[i].dot(body[i])) 
+                   for i in range(np.size(tim))])*180/np.pi #theta2
+    
+    if plot:
+        plt.figure(figsize=(7,6))
+        plt.xlim([-ph*180/np.pi*1.5,1.5*ph*180/np.pi])
+        plt.ylim([-ph*180/np.pi*1.5,1.5*ph*180/np.pi])
+        plt.xlabel(r'$\theta_1 \ (^{\circ})$')
+        plt.ylabel(r'$\theta_2 \ (^{\circ})$')
+        plt.axvline(0,color='grey'); plt.axhline(0,color='grey')
+        plt.scatter(t1,t2,c=tim,s=1.5,cmap='viridis')
+        plt.colorbar()
+        plt.title(r"$\phi = "+str(int(round(ph*180/np.pi,0)))+"^{\circ},\ \eta = "+str(round(et,2))+"$")
+        if save:
+            plt.savefig(figfile+"purcell_plot_"+str(round(ph,2))+"_"+str(round(et,2))+".png",dpi=300,bbox_inches="tight")
+        plt.show()
+    
+    return t1,t2
+    
+
+def P0(et,ph,lim=[0.5,1.5],res=0.1,plot=False,save=False,figfile="",T=6,strokes=0.75,k=100,e=0.3,c=0.6,gridsize=1):
     
     P_vec = np.arange(lim[0],lim[1]+res,res) #range of P values
     delphi0 = np.zeros(np.shape(P_vec))
@@ -57,29 +85,35 @@ def P0(et,ph,lim=[0.5,1.5],res=0.1,plot=False,figfile="",T=8,strokes=1,k=100,e=0
     for i,P in enumerate(P_vec):
         s,r,tim = init(et,ph,T=T)
         tau = stroke_input(P,tim,r,strokes=strokes)
-        R = slts.mesher()
-        try:
-            _,pswimmer = slts.evolve(tau,tim,R,r,s,k=k,e=e,c=c)
-            delphi0[i] = delphinought(tau,pswimmer,ph)
-        except ValueError: #sometimes the swimmer can swim out of frame
-            delphi0[i] = None
+        R = slts.mesher(np.arange(-gridsize, gridsize, 0.1))
+        _,pswimmer = slts.evolve(tau,tim,R,r,s,k=k,e=e,c=c)
+        delphi0[i] = delphinought(tau,pswimmer,ph)
         print("Progress:",np.round((i+1)/np.size(P_vec)*100,2),"%")
         
     #modifying the function:
-    jump = np.where(np.diff(delphi0)>0)[0][0]+1
-    delphi0[jump:] = delphi0[jump:]-np.pi
+    if np.any(np.diff(delphi0)>0): 
+        jump = np.where(np.diff(delphi0)>0)[0][0]+1
+        delphi0[jump:] = delphi0[jump:]-np.pi
     
     func = sp.interpolate.interp1d(delphi0, P_vec)
     P0 = func([0])[0]
     
     if plot:
-        plt.plot(P_vec,delphi0,'o',color='seagreen')
-        plt.plot(func(delphi0),delphi0,alpha=0.5)
+        _,ax = plt.subplots()
+        ax.plot(P_vec,delphi0,'o',color='seagreen')
+        ax.plot(func(delphi0),delphi0,alpha=0.5)
         plt.title("$\phi = "+str(round(ph,2))+",\ \eta = "+str(round(et,2))+"$")
-        plt.legend(["simulated values","interpolated values"])
-        plt.ylabel(r"$\Delta\phi_0$")
-        plt.xlabel(r"$P$")
-        plt.annotate("$P_0 = "+str(round(P0,3))+"$",(0.7*np.max(P_vec),np.mean(delphi0)))
-        plt.savefig(figfile+"parameter_space_"+str(round(ph,2))+"_"+str(round(et,2))+".png",dpi=300,bbox_inches="tight")
+        ax.legend(["simulated values","interpolated values"],loc='lower left')
+        ax.set_ylabel(r"$\Delta\phi_0$")
+        ax.set_xlabel(r"$P$")
+        plt.text(0.8,0.9,"$P_0 = "+str(round(P0,3))+"$",transform=ax.transAxes)
+        if save:
+            plt.savefig(figfile+"parameter_space_"+str(round(ph,2))+"_"+str(round(et,2))+".png",dpi=300,bbox_inches="tight")
+        plt.show()
     
     return P0
+
+def fit():
+    M = np.array([[0.37471675, 0.95780107, 0.05813255],
+                    [0.26757945, 1.15469392, 0.01554458],[8.09012094e-02, 1.21398877e+00, 6.42651528e-04]])
+    return M

@@ -66,8 +66,17 @@ def w(s,i,j,vi,vj):
     return w
 
 def angular_hookes(s,i,j,k,vi,vj,vk,c):
-    #torque acting on j due to i
-    power = -c*(w(s,i,j,vi,vj)-w(s,k,j,vk,vj))
+    
+    #finding the nearer and farther joints
+    if np.linalg.norm(s[i]-s[j])<np.linalg.norm(s[j]-s[k]):
+        near = i; vnear = vi
+        far = k; vfar = vk
+    else:
+        near = k; vnear = vk
+        far = i; vfar = vi
+        
+    #torque acting on the centre piece
+    power = c*(w(s,far,j,vfar,vj)-w(s,near,j,vnear,vj))
     return power
 
 def evolve (tau,tim,R,r,s,k,e,c=0):
@@ -99,7 +108,7 @@ def evolve (tau,tim,R,r,s,k,e,c=0):
 
         #get positions of rod elements due to flow
         for si in range(s.shape[0]):
-            s[si] += (Up(U[i],s[si],R)*dt)
+            s[si] += 3/2*(Up(U[i],s[si],R)*dt)-1/2*(Up(U[i-1],rod[i-1][si],R)*dt) #adam-bashforth method
             
         rod[i] = s
         
@@ -115,8 +124,7 @@ def evolve (tau,tim,R,r,s,k,e,c=0):
         #get torques for rigid angles
         for si in range(s.shape[0]-2):
             power = angular_hookes(s,si,si+1,si+2,Up(U[i],s[si],R),Up(U[i],s[si+1],R),Up(U[i],s[si+2],R),c)
-            sign = -1 if (np.mod(si,2) == 1) else 1
-            Uturn += rotlet(R,power*sign,s[si+1],e)
+            Uturn += rotlet(R,power,s[si+1],e)
         
     return U,rod
 
