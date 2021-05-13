@@ -1,6 +1,5 @@
 import numpy as np
 import scipy as sp
-import matplotlib.pyplot as plt
 from itertools import product
 
 def mesher(scale = np.arange(-1, 1, 0.1)):

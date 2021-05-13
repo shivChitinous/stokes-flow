@@ -26,13 +26,11 @@ def stroke_input(P,tim,r,strokes=4,f=0):
                                       shift=0.25)+alternating_stroke(tim,power=f*P,strokes=strokes,shift=0) 
     return tau
 
-def delphinought(tau,pswimmer,ph):
-    arm=[1,0] #second arm
+def delphihalf(tau,pswimmer,ph):
     shifts = np.where(np.diff(tau[0,:,-1])!=0)[0]+1 #every instant the motors switch
     #the second shift is when the second arm finishes its first stroke
-    x = pswimmer[shifts[1]+1].T[0][arm[0]]-pswimmer[shifts[1]+1].T[0][arm[1]]
-    y = pswimmer[shifts[1]+1].T[1][arm[0]]-pswimmer[shifts[1]+1].T[1][arm[1]]
-    angle = ph-np.arctan(y/x)
+    t1,t2 = thetas(pswimmer,shifts[1])
+    angle = (ph-t2)+(ph+t1)
     return angle
 
 def init(et,ph,size=1,dt=0.01,T=16):
@@ -47,18 +45,17 @@ def init(et,ph,size=1,dt=0.01,T=16):
     tim = np.arange(0,T,dt)
     return s,r,tim
 
-def stroke_function(omega,delphinought):
-    s = omega/np.max(omega)+delphinought/np.max(delphinought)
-    return s
+def thetas(swimmer,step):
+    arm1 = swimmer[step,0]-swimmer[step,1] #arm 1 vector 
+    body = swimmer[step,1]-swimmer[step,2] #body vector
+    arm2 = swimmer[step,3]-swimmer[step,2] #arm 2 vector
+    t1 = np.arctan2(np.array([0,0,-1]).dot(np.cross(arm2,-body)),arm2.dot(-body)) #theta1
+    t2 = np.arctan2(np.array([0,0,-1]).dot(np.cross(arm1,body)),arm1.dot(body)) #theta2
+    return t1,t2
 
-def purcell_plot(swimmer,tim,ph,et,plot=False,save=False,figfile=""):
-    arm1 = swimmer[:,0]-swimmer[:,1] #arm 1 vector 
-    body = swimmer[:,1]-swimmer[:,2] #body vector
-    arm2 = swimmer[:,3]-swimmer[:,2] #arm 2 vector
-    t1 = np.array([np.arctan2(np.array([0,0,-1]).dot(np.cross(arm2[i],-body[i])),arm2[i].dot(-body[i])) 
-                   for i in range(np.size(tim))])*180/np.pi #theta1
-    t2 = np.array([np.arctan2(np.array([0,0,-1]).dot(np.cross(arm1[i],body[i])),arm1[i].dot(body[i])) 
-                   for i in range(np.size(tim))])*180/np.pi #theta2
+def purcell_plot(swimmer,tim,ph,et,plot=False,save=False,figfile=""):   
+    t1 = np.array([thetas(swimmer,i)[0] for i in range(np.size(tim))])*180/np.pi #theta1
+    t2 = np.array([thetas(swimmer,i)[1] for i in range(np.size(tim))])*180/np.pi #theta2
     
     if plot:
         plt.figure(figsize=(7,6))
@@ -75,45 +72,16 @@ def purcell_plot(swimmer,tim,ph,et,plot=False,save=False,figfile=""):
         plt.show()
     
     return t1,t2
-    
 
-def P0(et,ph,lim=[0.5,1.5],res=0.1,plot=False,save=False,figfile="",T=6,strokes=0.75,k=100,e=0.3,c=0.6,gridsize=1):
-    
-    P_vec = np.arange(lim[0],lim[1]+res,res) #range of P values
-    delphi0 = np.zeros(np.shape(P_vec))
-    
-    for i,P in enumerate(P_vec):
-        s,r,tim = init(et,ph,T=T)
-        tau = stroke_input(P,tim,r,strokes=strokes)
-        R = slts.mesher(np.arange(-gridsize, gridsize, 0.1))
-        _,pswimmer = slts.evolve(tau,tim,R,r,s,k=k,e=e,c=c)
-        delphi0[i] = delphinought(tau,pswimmer,ph)
-        print("Progress:",np.round((i+1)/np.size(P_vec)*100,2),"%")
-        
-    #modifying the function:
-    if np.any(np.diff(delphi0)>0): 
-        jump = np.where(np.diff(delphi0)>0)[0][0]+1
-        delphi0[jump:] = delphi0[jump:]-np.pi
-    
-    func = sp.interpolate.interp1d(delphi0, P_vec)
-    P0 = func([0])[0]
-    
-    if plot:
-        _,ax = plt.subplots()
-        ax.plot(P_vec,delphi0,'o',color='seagreen')
-        ax.plot(func(delphi0),delphi0,alpha=0.5)
-        plt.title("$\phi = "+str(round(ph,2))+",\ \eta = "+str(round(et,2))+"$")
-        ax.legend(["simulated values","interpolated values"],loc='lower left')
-        ax.set_ylabel(r"$\Delta\phi_0$")
-        ax.set_xlabel(r"$P$")
-        plt.text(0.8,0.9,"$P_0 = "+str(round(P0,3))+"$",transform=ax.transAxes)
-        if save:
-            plt.savefig(figfile+"parameter_space_"+str(round(ph,2))+"_"+str(round(et,2))+".png",dpi=300,bbox_inches="tight")
-        plt.show()
-    
-    return P0
+def P_minimizer(P,et,ph,T=5,strokes=0.625,k=100,e=0.3,c=0.6,gridsize=1,res=0.1):
+    s,r,tim = init(et,ph,T=T)
+    tau = stroke_input(P,tim,r,strokes=strokes)
+    R = slts.mesher(np.arange(-gridsize, gridsize, res))
+    _,pswimmer = slts.evolve(tau,tim,R,r,s,k=k,e=e,c=c)
+    delphiH = delphihalf(tau,pswimmer,ph)
+    return delphiH
 
 def fit():
-    M = np.array([[0.37471675, 0.95780107, 0.05813255],
-                    [0.26757945, 1.15469392, 0.01554458],[8.09012094e-02, 1.21398877e+00, 6.42651528e-04]])
+    M = np.array([[0.33373467,1.02850784,0.03312612],
+                    [0.46860363,0.9070047,0.06290173],[0.26994491,1.04919476,0.0259014]])
     return M
